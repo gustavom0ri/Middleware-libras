@@ -1,103 +1,192 @@
 """
-Camada 3 — Integração VLibras
-Converte texto em português para glosa e repassa ao avatar (Camada 4).
-Usa a API pública do VLibras: https://vlibras.gov.br/api/translate
+Camada 4 — Avatar VLibras flutuante
+Janela sem borda, transparente, sempre no topo, arrastável.
+Embute o player oficial do VLibras via QWebEngineView.
 """
 
-import requests
-import queue
-import threading
-import logging
+import sys
+import os
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEngineSettings
+from PyQt6.QtCore import Qt, QUrl, QPoint, pyqtSlot
+from PyQt6.QtGui import QColor
+import tempfile
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
+# HTML que embute o player VLibras com fundo transparente
+VLIBRAS_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: transparent !important;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+  }
+  /* Esconde todos os controles do widget VLibras — só o avatar */
+  [vw-access-button],
+  .vw-plugin-top-wrapper,
+  .vw-settings,
+  .vw-footer,
+  .vw-text-bar,
+  .vw-progress-bar {
+    display: none !important;
+  }
+  [vw-plugin-wrapper] {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background: transparent !important;
+  }
+  /* Canvas do Unity (avatar 3D) */
+  canvas {
+    background: transparent !important;
+  }
+</style>
+</head>
+<body>
+  <div vw class="enabled">
+    <div vw-access-button class="active"></div>
+    <div vw-plugin-wrapper>
+      <div class="vw-plugin-top-wrapper"></div>
+    </div>
+  </div>
+  <script src="https://vlibras.gov.br/app/vlibras-plugin.js"></script>
+  <script>
+    // Inicializa o widget em modo ativo
+    new window.VLibras.Widget({
+      rootPath: 'https://vlibras.gov.br/app',
+      personalization: 'https://vlibras.gov.br/config/configs.json',
+      opacity: 0,        // fundo do widget transparente
+      avatar: 'icaro',   // icaro | hosana | guga | random
+    });
 
-VLIBRAS_API_URL = "https://vlibras.gov.br/api/translate"
-REQUEST_TIMEOUT = 8  # segundos
+    // Abre automaticamente o player ao carregar
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        const btn = document.querySelector('[vw-access-button]');
+        if (btn) btn.click();
+      }, 1500);
+    });
+
+    // Função chamada pelo Python para traduzir uma glosa
+    function traduzir(glosa) {
+      if (window.VLibras && window.VLibras.Widget) {
+        window.dispatchEvent(new CustomEvent('vlibras:translate', {
+          detail: { text: glosa }
+        }));
+      }
+    }
+  </script>
+</body>
+</html>
+"""
 
 
-class VLibrasTranslator:
+class AvatarWindow(QWidget):
     """
-    Consome textos da fila da Camada 2, traduz para glosa via API VLibras
-    e coloca o resultado em uma fila para a Camada 4 (avatar).
+    Janela flutuante transparente com o avatar VLibras.
+    - Sem borda e sem barra de título
+    - Sempre visível sobre outras janelas
+    - Arrastável pelo mouse
+    - Redimensionável pelos cantos
     """
 
-    def __init__(self):
-        self.glosa_queue: queue.Queue[str] = queue.Queue()
-        self._thread = None
-        self._running = False
+    def __init__(self, width: int = 320, height: int = 420):
+        super().__init__()
+        self._drag_pos = QPoint()
+        self._setup_window(width, height)
+        self._setup_webview()
 
     # ------------------------------------------------------------------
-    # Tradução de um texto para glosa
+    # Configuração da janela
     # ------------------------------------------------------------------
-    def _translate(self, text: str) -> str | None:
-        """
-        Envia texto PT-BR para a API VLibras e retorna a glosa.
-        Retorna o próprio texto em caso de falha (fallback — o player
-        soletrar palavra por palavra).
-        """
-        try:
-            response = requests.get(
-                VLIBRAS_API_URL,
-                params={"text": text},
-                timeout=REQUEST_TIMEOUT,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            # A API retorna {"glosa": "...", ...}
-            glosa = data.get("glosa") or data.get("text") or text
-            logger.info(f"Glosa: {glosa}")
-            return glosa
-
-        except requests.exceptions.ConnectionError:
-            logger.warning("Sem conexão com VLibras — usando texto original como fallback.")
-            return text
-        except requests.exceptions.Timeout:
-            logger.warning("Timeout na API VLibras — usando fallback.")
-            return text
-        except Exception as e:
-            logger.warning(f"Erro na API VLibras: {e} — usando fallback.")
-            return text
-
-    # ------------------------------------------------------------------
-    # Worker em background
-    # ------------------------------------------------------------------
-    def _worker(self, text_queue: queue.Queue):
-        while self._running:
-            try:
-                text = text_queue.get(timeout=1.0)
-            except queue.Empty:
-                continue
-
-            glosa = self._translate(text)
-            if glosa:
-                self.glosa_queue.put(glosa)
-
-    def start(self, text_queue: queue.Queue):
-        """Inicia o tradutor passando a text_queue da Camada 2."""
-        if self._running:
-            logger.warning("Tradutor já está rodando.")
-            return
-
-        self._running = True
-        self._thread = threading.Thread(
-            target=self._worker,
-            args=(text_queue,),
-            daemon=True,
-            name="vlibras-worker",
+    def _setup_window(self, width: int, height: int):
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint      # sem borda
+            | Qt.WindowType.WindowStaysOnTopHint   # sempre no topo
+            | Qt.WindowType.Tool                   # não aparece na taskbar
         )
-        self._thread.start()
-        logger.info("Tradutor VLibras iniciado.")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # fundo transparente
+        self.resize(width, height)
 
-    def stop(self):
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=5.0)
-        logger.info("Tradutor VLibras encerrado.")
+        # Posiciona no canto inferior direito da tela
+        screen = QApplication.primaryScreen().geometry()
+        self.move(
+            screen.width() - width - 20,
+            screen.height() - height - 60,
+        )
 
-    def get_glosa(self, timeout: float = 5.0) -> str | None:
-        try:
-            return self.glosa_queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
+    def _setup_webview(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._webview = QWebEngineView()
+        self._webview.setStyleSheet("background: transparent;")
+        self._webview.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        # Habilita JavaScript e plugins necessários
+        settings = self._webview.settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+
+        # Carrega o HTML do player VLibras
+        self._webview.setHtml(VLIBRAS_HTML, QUrl("https://vlibras.gov.br"))
+
+        layout.addWidget(self._webview)
+
+    # ------------------------------------------------------------------
+    # Tradução — chamado pela interface principal
+    # ------------------------------------------------------------------
+    @pyqtSlot(str)
+    def translate(self, glosa: str):
+        """Envia uma glosa para o avatar animar."""
+        # Escapa aspas para não quebrar o JavaScript
+        glosa_escaped = glosa.replace("'", "\\'").replace('"', '\\"')
+        self._webview.page().runJavaScript(f"traduzir('{glosa_escaped}');")
+
+    # ------------------------------------------------------------------
+    # Arrastar a janela pelo mouse
+    # ------------------------------------------------------------------
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and not self._drag_pos.isNull():
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = QPoint()
+
+
+# ------------------------------------------------------------------
+# Teste isolado da janela do avatar
+# ------------------------------------------------------------------
+if __name__ == "__main__":
+    # Fix DLL torch no Windows
+    try:
+        import torch
+        torch_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+        if os.path.isdir(torch_dir):
+            os.add_dll_directory(torch_dir)
+    except Exception:
+        pass
+
+    app = QApplication(sys.argv)
+
+    avatar = AvatarWindow()
+    avatar.show()
+
+    # Testa tradução após 3 segundos
+    from PyQt6.QtCore import QTimer
+    QTimer.singleShot(3000, lambda: avatar.translate("OLÁ TUDO BEM VOCÊ"))
+
+    sys.exit(app.exec())
