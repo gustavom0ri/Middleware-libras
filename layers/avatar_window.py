@@ -1,160 +1,224 @@
-"""
-Camada 4 — Avatar VLibras flutuante
-Janela sem borda, transparente, sempre no topo, arrastável.
-Embute o player oficial do VLibras via QWebEngineView.
-"""
-
 import sys
 import os
+import tempfile
+import threading
+import http.server
+import socketserver
 from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import QWebEngineSettings
-from PyQt6.QtCore import Qt, QUrl, QPoint, pyqtSlot
-from PyQt6.QtGui import QColor
-import tempfile
+from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage, QWebEngineProfile
+from PyQt6.QtCore import Qt, QUrl, QPoint, pyqtSlot, QTimer
 
-# HTML que embute o player VLibras com fundo transparente
-VLIBRAS_HTML = """
-<!DOCTYPE html>
+HTTP_PORT = 19825
+
+HTML = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    background: transparent !important;
-    overflow: hidden;
-    width: 100%;
-    height: 100%;
-  }
-  /* Esconde todos os controles do widget VLibras — só o avatar */
-  [vw-access-button],
-  .vw-plugin-top-wrapper,
-  .vw-settings,
-  .vw-footer,
-  .vw-text-bar,
-  .vw-progress-bar {
-    display: none !important;
-  }
-  [vw-plugin-wrapper] {
-    position: fixed !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    background: transparent !important;
-  }
-  /* Canvas do Unity (avatar 3D) */
-  canvas {
-    background: transparent !important;
-  }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  background: #1a2a3a;
+  overflow: hidden;
+}
+/* Esconde tudo exceto o player */
+[vw-access-button] { display: none !important; }
+[vw-plugin-wrapper] {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1 !important;
+}
+.vw-plugin-top-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+}
+/* Esconde controles internos do player pelos seletores exatos */
+[vp-main-guide-screen],
+[vp-rate-box],
+[vp-suggestion-screen],
+[vp-settings],
+[vp-info-screen],
+[vp-translator-screen],
+[vp-more-options-screen],
+[vp-aux-controls],
+[vp-controls],
+[vp-change-avatar],
+[vp-emotions-tooltip],
+[vp-click-blocker],
+.vp-guide-container,
+.vpw-controls,
+.vpw-message-box,
+[settings-btn],
+[settings-btn-close],
+.vpw-settings-btn,
+.vpw-mes {
+  display: none !important;
+}
 </style>
 </head>
 <body>
-  <div vw class="enabled">
-    <div vw-access-button class="active"></div>
-    <div vw-plugin-wrapper>
-      <div class="vw-plugin-top-wrapper"></div>
-    </div>
+<div vw class="enabled">
+  <div vw-access-button class="active"></div>
+  <div vw-plugin-wrapper>
+    <div class="vw-plugin-top-wrapper"></div>
   </div>
-  <script src="https://vlibras.gov.br/app/vlibras-plugin.js"></script>
-  <script>
-    // Inicializa o widget em modo ativo
-    new window.VLibras.Widget({
-      rootPath: 'https://vlibras.gov.br/app',
-      personalization: 'https://vlibras.gov.br/config/configs.json',
-      opacity: 0,        // fundo do widget transparente
-      avatar: 'icaro',   // icaro | hosana | guga | random
-    });
+</div>
+<script src="https://vlibras.gov.br/app/vlibras-plugin.js"></script>
+<script>
+new window.VLibras.Widget({
+  rootPath: 'https://vlibras.gov.br/app',
+  avatar: 'icaro',
+  opacity: 0,
+  position: 'BR',
+});
 
-    // Abre automaticamente o player ao carregar
-    window.addEventListener('load', () => {
-      setTimeout(() => {
-        const btn = document.querySelector('[vw-access-button]');
-        if (btn) btn.click();
-      }, 1500);
-    });
+// Abre o player e fecha tutorial automaticamente
+function init() {
+  var btn = document.querySelector('[vw-access-button]');
+  if (btn) {
+    btn.click();
 
-    // Função chamada pelo Python para traduzir uma glosa
-    function traduzir(glosa) {
-      if (window.VLibras && window.VLibras.Widget) {
-        window.dispatchEvent(new CustomEvent('vlibras:translate', {
-          detail: { text: glosa }
-        }));
-      }
-    }
-  </script>
+    setTimeout(function() {
+      var denyBtn = document.querySelector('.vpw-guide__main__deny-btn');
+      if (denyBtn) denyBtn.click();
+
+      var hideSelectors = [
+        '[vp-main-guide-screen]','[vp-rate-box]','[vp-suggestion-screen]',
+        '[vp-settings]','[vp-info-screen]','[vp-translator-screen]',
+        '[vp-more-options-screen]','[vp-aux-controls]','[vp-controls]',
+        '[vp-change-avatar]','[vp-click-blocker]','[vp-emotions-tooltip]',
+        '.vp-guide-container','.vpw-controls','.vpw-message-box',
+        '[settings-btn]','.vpw-settings-btn','.vpw-mes'
+      ];
+      hideSelectors.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) { el.style.display = 'none'; });
+      });
+    }, 800);
+
+    setInterval(function() {
+      var denyBtn = document.querySelector('.vpw-guide__main__deny-btn');
+      if (denyBtn && denyBtn.offsetParent !== null) denyBtn.click();
+
+      var hideSelectors = [
+        '[vp-main-guide-screen]','[vp-rate-box]','[vp-suggestion-screen]',
+        '[vp-controls]','[vp-aux-controls]','[vp-change-avatar]',
+        '.vp-guide-container','.vpw-controls','.vpw-message-box'
+      ];
+      hideSelectors.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) { el.style.display = 'none'; });
+      });
+    }, 1500);
+
+  } else {
+    setTimeout(init, 500);
+  }
+}
+setTimeout(init, 2000);
+
+// Funcao para traduzir texto
+function traduzir(texto) {
+  window.dispatchEvent(new CustomEvent('vlibras:translate', {
+    detail: { text: texto }
+  }));
+}
+</script>
 </body>
-</html>
-"""
+</html>"""
+
+
+_server_started = False
+
+def start_server():
+    global _server_started
+    if _server_started:
+        return
+    _server_started = True
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(HTML.encode("utf-8"))
+        def log_message(self, *a): pass
+
+    try:
+        with socketserver.TCPServer(("127.0.0.1", HTTP_PORT), Handler) as srv:
+            srv.serve_forever()
+    except OSError:
+        pass
+
+threading.Thread(target=start_server, daemon=True).start()
+
+
+class ConsolePage(QWebEnginePage):
+    def javaScriptConsoleMessage(self, level, message, line, source):
+        print(f"[JS] {message}")
 
 
 class AvatarWindow(QWidget):
-    """
-    Janela flutuante transparente com o avatar VLibras.
-    - Sem borda e sem barra de título
-    - Sempre visível sobre outras janelas
-    - Arrastável pelo mouse
-    - Redimensionável pelos cantos
-    """
-
-    def __init__(self, width: int = 320, height: int = 420):
+    def __init__(self, width=300, height=420):
         super().__init__()
         self._drag_pos = QPoint()
-        self._setup_window(width, height)
+        self._width = width
+        self._height = height
+        self._setup_window()
         self._setup_webview()
 
-    # ------------------------------------------------------------------
-    # Configuração da janela
-    # ------------------------------------------------------------------
-    def _setup_window(self, width: int, height: int):
+    def _setup_window(self):
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint      # sem borda
-            | Qt.WindowType.WindowStaysOnTopHint   # sempre no topo
-            | Qt.WindowType.Tool                   # não aparece na taskbar
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # fundo transparente
-        self.resize(width, height)
+        self.setStyleSheet("background: #1a2a3a;")
+        self.resize(self._width, self._height)
+        self._place_on_screen()
 
-        # Posiciona no canto inferior direito da tela
+    def _place_on_screen(self):
         screen = QApplication.primaryScreen().geometry()
         self.move(
-            screen.width() - width - 20,
-            screen.height() - height - 60,
+            screen.width()  - self._width  - 20,
+            screen.height() - self._height - 60,
         )
 
     def _setup_webview(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self._webview = QWebEngineView()
-        self._webview.setStyleSheet("background: transparent;")
-        self._webview.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        cache_path = os.path.join(tempfile.gettempdir(), "vlibras_wgt")
+        os.makedirs(cache_path, exist_ok=True)
 
-        # Habilita JavaScript e plugins necessários
-        settings = self._webview.settings()
+        self._profile = QWebEngineProfile("vlibras_wgt", self)
+        self._profile.setCachePath(cache_path)
+        self._profile.setPersistentStoragePath(cache_path)
+
+        self._page = ConsolePage(self._profile, self)
+
+        settings = self._page.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
 
-        # Carrega o HTML do player VLibras
-        self._webview.setHtml(VLIBRAS_HTML, QUrl("https://vlibras.gov.br"))
-
+        self._webview = QWebEngineView()
+        self._webview.setPage(self._page)
+        self._webview.setStyleSheet("background: #1a2a3a;")
+        self._webview.load(QUrl(f"http://127.0.0.1:{HTTP_PORT}/"))
         layout.addWidget(self._webview)
 
-    # ------------------------------------------------------------------
-    # Tradução — chamado pela interface principal
-    # ------------------------------------------------------------------
-    @pyqtSlot(str)
-    def translate(self, glosa: str):
-        """Envia uma glosa para o avatar animar."""
-        # Escapa aspas para não quebrar o JavaScript
-        glosa_escaped = glosa.replace("'", "\\'").replace('"', '\\"')
-        self._webview.page().runJavaScript(f"traduzir('{glosa_escaped}');")
+    def retry(self):
+        self._profile.cookieStore().deleteAllCookies()
+        self._place_on_screen()
+        self._webview.load(QUrl(f"http://127.0.0.1:{HTTP_PORT}/"))
 
-    # ------------------------------------------------------------------
-    # Arrastar a janela pelo mouse
-    # ------------------------------------------------------------------
+    @pyqtSlot(str)
+    def translate(self, text: str):
+        escaped = text.replace("'", "\\'").replace('"', '\\"')
+        self._page.runJavaScript(f"traduzir('{escaped}');")
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -167,11 +231,7 @@ class AvatarWindow(QWidget):
         self._drag_pos = QPoint()
 
 
-# ------------------------------------------------------------------
-# Teste isolado da janela do avatar
-# ------------------------------------------------------------------
 if __name__ == "__main__":
-    # Fix DLL torch no Windows
     try:
         import torch
         torch_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
@@ -180,13 +240,13 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    app = QApplication(sys.argv)
+    from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa
+    from PyQt6.QtCore import QCoreApplication
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--enable-gpu --ignore-gpu-blocklist"
 
+    app = QApplication(sys.argv)
     avatar = AvatarWindow()
     avatar.show()
-
-    # Testa tradução após 3 segundos
-    from PyQt6.QtCore import QTimer
-    QTimer.singleShot(3000, lambda: avatar.translate("OLÁ TUDO BEM VOCÊ"))
-
+    QTimer.singleShot(10000, lambda: avatar.translate("OLA TUDO BEM"))
     sys.exit(app.exec())

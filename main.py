@@ -1,12 +1,10 @@
 """
-Interface principal — Middleware Libras
-Layout moderno com terminal de transcrição, seletor de modelo e controles.
+Interface principal - Middleware Libras
 """
 
 import sys
 import os
 
-# Fix: garante que as DLLs do torch sejam encontradas pelo PyQt6
 try:
     import torch
     torch_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
@@ -15,150 +13,173 @@ try:
 except Exception:
     pass
 
+from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+
 import queue
 import threading
+import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QComboBox, QTextEdit, QFrame, QSizePolicy
+    QPushButton, QLabel, QComboBox, QTextEdit, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
-from PyQt6.QtGui import QFont, QColor, QTextCursor, QPalette
+from PyQt6.QtGui import QTextCursor
 
-STYLESHEET = """
-* {
+DARK = {
+    "bg":           "#0D0D0D",
+    "bg2":          "#111111",
+    "bg3":          "#080808",
+    "border":       "#1E1E1E",
+    "border2":      "#141414",
+    "accent":       "#00FF88",
+    "accent_dim":   "#00FF8844",
+    "accent_bg":    "#0A2A1A",
+    "danger":       "#FF4466",
+    "danger_dim":   "#FF446644",
+    "danger_bg":    "#1A0A0F",
+    "text":         "#C8C8C8",
+    "text_dim":     "#444444",
+    "text_muted":   "#252525",
+    "text_title":   "#E0E0E0",
+    "status_bg":    "#1A1A1A",
+    "status_text":  "#555555",
+    "status_border":"#2A2A2A",
+    "scroll":       "#2A2A2A",
+    "combo_bg":     "#1A1A1A",
+    "combo_text":   "#CCCCCC",
+    "ts_color":     "#333333",
+}
+
+LIGHT = {
+    "bg":           "#F5F5F0",
+    "bg2":          "#EBEBЕ6",
+    "bg2":          "#E8E8E3",
+    "bg3":          "#FFFFFF",
+    "border":       "#DDDDDD",
+    "border2":      "#E5E5E5",
+    "accent":       "#00AA66",
+    "accent_dim":   "#00AA6633",
+    "accent_bg":    "#E0F5EC",
+    "danger":       "#DD2244",
+    "danger_dim":   "#DD224433",
+    "danger_bg":    "#FDE8EC",
+    "text":         "#222222",
+    "text_dim":     "#888888",
+    "text_muted":   "#BBBBBB",
+    "text_title":   "#111111",
+    "status_bg":    "#EEEEEE",
+    "status_text":  "#999999",
+    "status_border":"#DDDDDD",
+    "scroll":       "#CCCCCC",
+    "combo_bg":     "#FFFFFF",
+    "combo_text":   "#333333",
+    "ts_color":     "#AAAAAA",
+}
+
+
+def build_stylesheet(t: dict) -> str:
+    return f"""
+* {{
     font-family: 'Consolas', 'Courier New', monospace;
-    color: #E0E0E0;
-}
-
-QMainWindow, QWidget#root {
-    background-color: #0D0D0D;
-}
-
-/* Barra de topo */
-QWidget#topbar {
-    background-color: #0D0D0D;
-    border-bottom: 1px solid #1E1E1E;
-}
-
-QLabel#app_title {
-    font-family: 'Consolas', monospace;
+    color: {t['text_title']};
+}}
+QMainWindow, QWidget#root {{
+    background-color: {t['bg']};
+}}
+QWidget#topbar {{
+    background-color: {t['bg']};
+    border-bottom: 1px solid {t['border']};
+}}
+QLabel#app_title {{
     font-size: 13px;
     font-weight: bold;
-    color: #00FF88;
+    color: {t['accent']};
     letter-spacing: 3px;
-}
-
-QLabel#app_subtitle {
+}}
+QLabel#app_subtitle {{
     font-size: 11px;
-    color: #444;
+    color: {t['text_dim']};
     letter-spacing: 1px;
-}
-
-/* Status pill */
-QLabel#status_idle {
-    background-color: #1A1A1A;
-    color: #555;
+}}
+QLabel#status_idle {{
+    background-color: {t['status_bg']};
+    color: {t['status_text']};
     font-size: 10px;
     letter-spacing: 2px;
-    border: 1px solid #2A2A2A;
+    border: 1px solid {t['status_border']};
     border-radius: 10px;
     padding: 3px 12px;
-}
-
-QLabel#status_running {
-    background-color: #0A2A1A;
-    color: #00FF88;
+}}
+QLabel#status_running {{
+    background-color: {t['accent_bg']};
+    color: {t['accent']};
     font-size: 10px;
     letter-spacing: 2px;
-    border: 1px solid #00FF8855;
+    border: 1px solid {t['accent_dim']};
     border-radius: 10px;
     padding: 3px 12px;
-}
-
-/* Painel de configuração */
-QWidget#config_panel {
-    background-color: #111111;
-    border: 1px solid #1E1E1E;
+}}
+QWidget#config_panel {{
+    background-color: {t['bg2']};
+    border: 1px solid {t['border']};
     border-radius: 8px;
-}
-
-QLabel#config_label {
+}}
+QLabel#config_label {{
     font-size: 10px;
-    color: #555;
+    color: {t['text_dim']};
     letter-spacing: 2px;
-}
-
-QComboBox {
-    background-color: #1A1A1A;
-    border: 1px solid #2A2A2A;
+}}
+QComboBox {{
+    background-color: {t['combo_bg']};
+    border: 1px solid {t['border']};
     border-radius: 5px;
     padding: 6px 12px;
     font-size: 12px;
-    color: #CCC;
+    color: {t['combo_text']};
     min-width: 200px;
-}
-
-QComboBox:hover {
-    border-color: #00FF8844;
-}
-
-QComboBox::drop-down {
-    border: none;
-    padding-right: 8px;
-}
-
-QComboBox QAbstractItemView {
-    background-color: #1A1A1A;
-    border: 1px solid #2A2A2A;
-    selection-background-color: #0A2A1A;
-    selection-color: #00FF88;
-}
-
-/* Terminal */
-QWidget#terminal_container {
-    background-color: #080808;
-    border: 1px solid #1E1E1E;
+}}
+QComboBox:hover {{ border-color: {t['accent_dim']}; }}
+QComboBox::drop-down {{ border: none; padding-right: 8px; }}
+QComboBox QAbstractItemView {{
+    background-color: {t['combo_bg']};
+    border: 1px solid {t['border']};
+    selection-background-color: {t['accent_bg']};
+    selection-color: {t['accent']};
+}}
+QWidget#terminal_container {{
+    background-color: {t['bg3']};
+    border: 1px solid {t['border']};
     border-radius: 8px;
-}
-
-QLabel#terminal_header {
+}}
+QLabel#terminal_header {{
     font-size: 10px;
-    color: #333;
+    color: {t['text_dim']};
     letter-spacing: 2px;
     padding: 8px 16px 4px 16px;
-    border-bottom: 1px solid #141414;
-}
-
-QTextEdit#terminal {
-    background-color: #080808;
+    border-bottom: 1px solid {t['border2']};
+}}
+QTextEdit#terminal {{
+    background-color: {t['bg3']};
     border: none;
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 13px;
-    color: #C8C8C8;
+    color: {t['text']};
     padding: 12px 16px;
-    line-height: 1.6;
-    selection-background-color: #0A2A1A;
-}
-
-QScrollBar:vertical {
-    background: #0D0D0D;
+    selection-background-color: {t['accent_bg']};
+}}
+QScrollBar:vertical {{
+    background: {t['bg']};
     width: 6px;
     border: none;
-}
-
-QScrollBar::handle:vertical {
-    background: #2A2A2A;
+}}
+QScrollBar::handle:vertical {{
+    background: {t['scroll']};
     border-radius: 3px;
     min-height: 20px;
-}
-
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0;
-}
-
-/* Botões */
-QPushButton#btn_start {
-    background-color: #00FF88;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QPushButton#btn_start {{
+    background-color: {t['accent']};
     color: #000000;
     border: none;
     border-radius: 6px;
@@ -167,64 +188,62 @@ QPushButton#btn_start {
     letter-spacing: 2px;
     padding: 10px 28px;
     min-width: 120px;
-}
-
-QPushButton#btn_start:hover {
-    background-color: #00FFB0;
-}
-
-QPushButton#btn_start:pressed {
-    background-color: #00CC70;
-}
-
-QPushButton#btn_stop {
+}}
+QPushButton#btn_start:hover {{ background-color: {t['accent']}CC; }}
+QPushButton#btn_start:pressed {{ background-color: {t['accent']}99; }}
+QPushButton#btn_stop {{
     background-color: transparent;
-    color: #FF4466;
-    border: 1px solid #FF446644;
+    color: {t['danger']};
+    border: 1px solid {t['danger_dim']};
     border-radius: 6px;
     font-size: 12px;
     letter-spacing: 2px;
     padding: 10px 28px;
     min-width: 120px;
-}
-
-QPushButton#btn_stop:hover {
-    background-color: #1A0A0F;
-    border-color: #FF4466;
-}
-
-QPushButton#btn_stop:disabled {
-    color: #333;
-    border-color: #222;
-}
-
-QPushButton#btn_clear {
+}}
+QPushButton#btn_stop:hover {{
+    background-color: {t['danger_bg']};
+    border-color: {t['danger']};
+}}
+QPushButton#btn_stop:disabled {{
+    color: {t['text_dim']};
+    border-color: {t['border']};
+}}
+QPushButton#btn_secondary {{
     background-color: transparent;
-    color: #444;
-    border: 1px solid #1E1E1E;
+    color: {t['text_dim']};
+    border: 1px solid {t['border']};
     border-radius: 6px;
     font-size: 11px;
     letter-spacing: 1px;
     padding: 10px 20px;
-}
-
-QPushButton#btn_clear:hover {
-    color: #888;
-    border-color: #333;
-}
-
-/* Rodapé */
-QLabel#footer {
+}}
+QPushButton#btn_secondary:hover {{
+    color: {t['text']};
+    border-color: {t['text_dim']};
+}}
+QPushButton#btn_theme {{
+    background-color: transparent;
+    color: {t['text_dim']};
+    border: 1px solid {t['border']};
+    border-radius: 6px;
+    font-size: 13px;
+    padding: 8px 14px;
+    min-width: 36px;
+}}
+QPushButton#btn_theme:hover {{
+    color: {t['text']};
+    border-color: {t['text_dim']};
+}}
+QLabel#footer {{
     font-size: 10px;
-    color: #252525;
+    color: {t['text_muted']};
     letter-spacing: 1px;
-}
+}}
 """
 
 
 class TranscriptionWorker(QObject):
-    """Worker que roda as 4 camadas em thread separada e emite sinais para a UI."""
-
     text_received = pyqtSignal(str)
     glosa_received = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
@@ -240,7 +259,6 @@ class TranscriptionWorker(QObject):
 
     def start_transcription(self):
         try:
-            import threading
             from layers.audio_capture import AudioCapture
             from layers.speech_to_text import SpeechToText
             from layers.vlibras_translator import VLibrasTranslator
@@ -299,12 +317,11 @@ class MainWindow(QMainWindow):
         self._is_running = False
         self._chunk_count = 0
         self._avatar_window = None
+        self._dark_mode = True
         self._setup_ui()
         self._setup_blink_timer()
+        self._apply_theme()
 
-    # ------------------------------------------------------------------
-    # UI
-    # ------------------------------------------------------------------
     def _setup_ui(self):
         root = QWidget()
         root.setObjectName("root")
@@ -334,11 +351,18 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel("● IDLE")
         self._status_label.setObjectName("status_idle")
 
+        self._btn_theme = QPushButton("☀")
+        self._btn_theme.setObjectName("btn_theme")
+        self._btn_theme.setToolTip("Alternar tema claro/escuro")
+        self._btn_theme.clicked.connect(self._toggle_theme)
+
         h.addWidget(title)
         h.addSpacing(12)
         h.addWidget(subtitle)
         h.addStretch()
         h.addWidget(self._status_label)
+        h.addSpacing(8)
+        h.addWidget(self._btn_theme)
         return bar
 
     def _build_config_panel(self) -> QWidget:
@@ -352,10 +376,10 @@ class MainWindow(QMainWindow):
 
         self._model_combo = QComboBox()
         self._model_combo.addItems([
-            "small  —  rápido  (~460MB, recomendado)",
+            "small  —  rapido  (~460MB, recomendado)",
             "medium —  preciso (~1.5GB, PCs potentes)",
-            "tiny   —  leve    (~75MB, baixa acurácia)",
-            "base   —  básico  (~145MB)",
+            "tiny   —  leve    (~75MB, baixa acuracia)",
+            "base   —  basico  (~145MB)",
         ])
 
         h.addWidget(lbl)
@@ -371,7 +395,7 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
 
-        header = QLabel("OUTPUT  /  TRANSCRIÇÃO EM TEMPO REAL")
+        header = QLabel("OUTPUT  /  TRANSCRICAO EM TEMPO REAL")
         header.setObjectName("terminal_header")
         v.addWidget(header)
 
@@ -379,8 +403,8 @@ class MainWindow(QMainWindow):
         self._terminal.setObjectName("terminal")
         self._terminal.setReadOnly(True)
         self._terminal.setPlaceholderText(
-            "// aguardando início da transcrição...\n"
-            "// pressione START para começar"
+            "// aguardando inicio da transcricao...\n"
+            "// pressione START para comecar"
         )
         v.addWidget(self._terminal)
         return container
@@ -399,19 +423,28 @@ class MainWindow(QMainWindow):
         self._btn_stop.setEnabled(False)
         self._btn_stop.clicked.connect(self._on_stop)
 
-        self._btn_clear = QPushButton("LIMPAR")
-        self._btn_clear.setObjectName("btn_clear")
-        self._btn_clear.clicked.connect(self._terminal.clear)
-
         self._btn_avatar = QPushButton("◉  AVATAR")
-        self._btn_avatar.setObjectName("btn_clear")
+        self._btn_avatar.setObjectName("btn_secondary")
         self._btn_avatar.clicked.connect(self._toggle_avatar)
+
+        self._btn_retry = QPushButton("↺")
+        self._btn_retry.setObjectName("btn_secondary")
+        self._btn_retry.setToolTip("Reiniciar avatar (limpa cache e cookies)")
+        self._btn_retry.setFixedWidth(36)
+        self._btn_retry.setEnabled(False)
+        self._btn_retry.clicked.connect(self._retry_avatar)
+
+        self._btn_clear = QPushButton("LIMPAR")
+        self._btn_clear.setObjectName("btn_secondary")
+        self._btn_clear.clicked.connect(self._terminal.clear)
 
         h.addWidget(self._btn_start)
         h.addSpacing(8)
         h.addWidget(self._btn_stop)
         h.addStretch()
         h.addWidget(self._btn_avatar)
+        h.addSpacing(4)
+        h.addWidget(self._btn_retry)
         h.addSpacing(8)
         h.addWidget(self._btn_clear)
         return w
@@ -432,9 +465,6 @@ class MainWindow(QMainWindow):
         h.addWidget(self._chunk_label)
         return w
 
-    # ------------------------------------------------------------------
-    # Blink do cursor no terminal
-    # ------------------------------------------------------------------
     def _setup_blink_timer(self):
         self._blink_state = False
         self._blink_timer = QTimer()
@@ -448,9 +478,18 @@ class MainWindow(QMainWindow):
         char = "█" if self._blink_state else " "
         self._footer_label.setText(f"ouvindo {char}")
 
-    # ------------------------------------------------------------------
-    # Lógica de início / parada
-    # ------------------------------------------------------------------
+    def _toggle_theme(self):
+        self._dark_mode = not self._dark_mode
+        self._apply_theme()
+
+    def _apply_theme(self):
+        t = DARK if self._dark_mode else LIGHT
+        QApplication.instance().setStyleSheet(build_stylesheet(t))
+        self._btn_theme.setText("☀" if self._dark_mode else "🌙")
+        self._ts_color  = t["ts_color"]
+        self._acc_color = t["accent"]
+        self._txt_color = t["text"]
+
     def _get_model_name(self) -> str:
         return self._model_combo.currentText().split()[0].strip()
 
@@ -475,7 +514,7 @@ class MainWindow(QMainWindow):
     def _on_stop(self):
         if self._worker:
             self._worker.stop()
-        self._log_system("transcrição encerrada.")
+        self._log_system("transcricao encerrada.")
 
     def _set_running(self, running: bool):
         self._is_running = running
@@ -493,29 +532,30 @@ class MainWindow(QMainWindow):
             self._blink_timer.stop()
             self._footer_label.setText("pronto.")
 
-        # Força recarregar o estilo após mudar objectName
         self._status_label.style().unpolish(self._status_label)
         self._status_label.style().polish(self._status_label)
 
-    # ------------------------------------------------------------------
-    # Saída no terminal
-    # ------------------------------------------------------------------
     def _toggle_avatar(self):
-        """Mostra ou esconde a janela flutuante do avatar."""
         from layers.avatar_window import AvatarWindow
         if self._avatar_window is None:
             self._avatar_window = AvatarWindow()
             self._avatar_window.show()
             self._btn_avatar.setText("◎  AVATAR")
-            self._log_system("avatar iniciado — arraste para posicionar na tela.")
+            self._btn_retry.setEnabled(True)
+            self._log_system("avatar iniciado — arraste para posicionar.")
         else:
             self._avatar_window.close()
             self._avatar_window = None
             self._btn_avatar.setText("◉  AVATAR")
+            self._btn_retry.setEnabled(False)
             self._log_system("avatar fechado.")
 
+    def _retry_avatar(self):
+        if self._avatar_window:
+            self._avatar_window.retry()
+            self._log_system("avatar reiniciado — aguarde carregar...")
+
     def _on_glosa(self, glosa: str):
-        """Repassa a glosa ao avatar para animar."""
         if self._avatar_window:
             self._avatar_window.translate(glosa)
 
@@ -524,14 +564,11 @@ class MainWindow(QMainWindow):
         self._chunk_label.setText(f"{self._chunk_count} chunks")
         cursor = self._terminal.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        # Timestamp pequeno + texto
-        import datetime
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         cursor.insertHtml(
-            f'<span style="color:#333;font-size:11px;">[{ts}]</span> '
-            f'<span style="color:#00FF88;">▸</span> '
-            f'<span style="color:#C8C8C8;">{text}</span><br>'
+            f'<span style="color:{self._ts_color};font-size:11px;">[{ts}]</span> '
+            f'<span style="color:{self._acc_color};">▸</span> '
+            f'<span style="color:{self._txt_color};">{text}</span><br>'
         )
         self._terminal.setTextCursor(cursor)
         self._terminal.ensureCursorVisible()
@@ -539,12 +576,12 @@ class MainWindow(QMainWindow):
     def _on_error(self, error: str):
         self._log_system(f"ERRO: {error}", color="#FF4466")
 
-    def _log_system(self, msg: str, color: str = "#444"):
+    def _log_system(self, msg: str, color: str = None):
+        if color is None:
+            color = self._ts_color if hasattr(self, '_ts_color') else "#444"
         cursor = self._terminal.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(
-            f'<span style="color:{color};font-size:11px;">// {msg}</span><br>'
-        )
+        cursor.insertHtml(f'<span style="color:{color};font-size:11px;">// {msg}</span><br>')
         self._terminal.setTextCursor(cursor)
         self._terminal.ensureCursorVisible()
 
@@ -556,14 +593,9 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
-# ------------------------------------------------------------------
-# Entry point
-# ------------------------------------------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyleSheet(STYLESHEET)
     app.setStyle("Fusion")
-
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
