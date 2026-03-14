@@ -1,0 +1,6 @@
+# Middleware Libras — dependências
+sounddevice==0.4.7
+numpy==1.26.4
+openai-whisper==20231117
+PyQt6==6.7.0
+requests==2.32.3
