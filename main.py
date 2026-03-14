@@ -223,9 +223,10 @@ QLabel#footer {
 
 
 class TranscriptionWorker(QObject):
-    """Worker que roda captura + STT em thread separada e emite sinais para a UI."""
+    """Worker que roda as 4 camadas em thread separada e emite sinais para a UI."""
 
     text_received = pyqtSignal(str)
+    glosa_received = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -234,12 +235,15 @@ class TranscriptionWorker(QObject):
         self.model_name = model_name
         self._capture = None
         self._stt = None
+        self._translator = None
         self._running = False
 
     def start_transcription(self):
         try:
+            import threading
             from layers.audio_capture import AudioCapture
             from layers.speech_to_text import SpeechToText
+            from layers.vlibras_translator import VLibrasTranslator
 
             self._stt = SpeechToText(model_name=self.model_name)
             self._stt.load()
@@ -247,7 +251,19 @@ class TranscriptionWorker(QObject):
             self._capture = AudioCapture(chunk_seconds=3)
             self._capture.start()
             self._stt.start(self._capture.audio_queue)
+
+            self._translator = VLibrasTranslator()
+            self._translator.start(self._stt.text_queue)
+
             self._running = True
+
+            def consume_glosa():
+                while self._running:
+                    glosa = self._translator.get_glosa(timeout=1.0)
+                    if glosa:
+                        self.glosa_received.emit(glosa)
+
+            threading.Thread(target=consume_glosa, daemon=True).start()
 
             while self._running:
                 text = self._stt.get_text(timeout=1.0)
@@ -264,6 +280,8 @@ class TranscriptionWorker(QObject):
         self._running = False
 
     def _cleanup(self):
+        if self._translator:
+            self._translator.stop()
         if self._stt:
             self._stt.stop()
         if self._capture:
@@ -280,6 +298,7 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._is_running = False
         self._chunk_count = 0
+        self._avatar_window = None
         self._setup_ui()
         self._setup_blink_timer()
 
@@ -384,10 +403,16 @@ class MainWindow(QMainWindow):
         self._btn_clear.setObjectName("btn_clear")
         self._btn_clear.clicked.connect(self._terminal.clear)
 
+        self._btn_avatar = QPushButton("◉  AVATAR")
+        self._btn_avatar.setObjectName("btn_clear")
+        self._btn_avatar.clicked.connect(self._toggle_avatar)
+
         h.addWidget(self._btn_start)
         h.addSpacing(8)
         h.addWidget(self._btn_stop)
         h.addStretch()
+        h.addWidget(self._btn_avatar)
+        h.addSpacing(8)
         h.addWidget(self._btn_clear)
         return w
 
@@ -440,6 +465,7 @@ class MainWindow(QMainWindow):
 
         self._thread.started.connect(self._worker.start_transcription)
         self._worker.text_received.connect(self._on_text)
+        self._worker.glosa_received.connect(self._on_glosa)
         self._worker.error_occurred.connect(self._on_error)
         self._worker.finished.connect(self._thread.quit)
         self._worker.finished.connect(lambda: self._set_running(False))
@@ -474,6 +500,25 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Saída no terminal
     # ------------------------------------------------------------------
+    def _toggle_avatar(self):
+        """Mostra ou esconde a janela flutuante do avatar."""
+        from layers.avatar_window import AvatarWindow
+        if self._avatar_window is None:
+            self._avatar_window = AvatarWindow()
+            self._avatar_window.show()
+            self._btn_avatar.setText("◎  AVATAR")
+            self._log_system("avatar iniciado — arraste para posicionar na tela.")
+        else:
+            self._avatar_window.close()
+            self._avatar_window = None
+            self._btn_avatar.setText("◉  AVATAR")
+            self._log_system("avatar fechado.")
+
+    def _on_glosa(self, glosa: str):
+        """Repassa a glosa ao avatar para animar."""
+        if self._avatar_window:
+            self._avatar_window.translate(glosa)
+
     def _on_text(self, text: str):
         self._chunk_count += 1
         self._chunk_label.setText(f"{self._chunk_count} chunks")
@@ -506,6 +551,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self._worker:
             self._worker.stop()
+        if self._avatar_window:
+            self._avatar_window.close()
         event.accept()
 
 
