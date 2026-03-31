@@ -33,7 +33,6 @@ html, body {
   width: 100% !important;
   height: 100% !important;
 }
-/* Esconde controles internos do player pelos seletores exatos */
 [vp-main-guide-screen],
 [vp-rate-box],
 [vp-suggestion-screen],
@@ -46,14 +45,40 @@ html, body {
 [vp-change-avatar],
 [vp-emotions-tooltip],
 [vp-click-blocker],
+[vp-dictionary],
+[vp-settings-btn],
+[vp-suggestion-button],
 .vp-guide-container,
 .vpw-controls,
 .vpw-message-box,
 [settings-btn],
 [settings-btn-close],
 .vpw-settings-btn,
-.vpw-mes {
+.vpw-mes,
+[vp-box],
+.vpw-box,
+.vw-links {
   display: none !important;
+}
+
+/* Canvas ocupa tudo sem margem do box */
+#gameContainer {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  background: #1a2a3a !important;
+  overflow: hidden !important;
+}
+
+#gameContainer canvas {
+  position: absolute !important;
+  top: 0 !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  height: 100% !important;
+  width: auto !important;
+  min-width: 150% !important;
 }
 </style>
 </head>
@@ -83,6 +108,10 @@ function init() {
       var denyBtn = document.querySelector('.vpw-guide__main__deny-btn');
       if (denyBtn) denyBtn.click();
 
+      // Abre o painel de traducao interno
+      var btnTranslator = document.querySelector('.vp-translator-button');
+      if (btnTranslator) btnTranslator.click();
+
       var hideSelectors = [
         '[vp-main-guide-screen]','[vp-rate-box]','[vp-suggestion-screen]',
         '[vp-settings]','[vp-info-screen]','[vp-translator-screen]',
@@ -103,7 +132,9 @@ function init() {
       var hideSelectors = [
         '[vp-main-guide-screen]','[vp-rate-box]','[vp-suggestion-screen]',
         '[vp-controls]','[vp-aux-controls]','[vp-change-avatar]',
-        '.vp-guide-container','.vpw-controls','.vpw-message-box'
+        '[vp-box]','.vpw-box','.vp-guide-container','.vpw-controls',
+        '.vpw-message-box','[vp-dictionary]','[vp-settings-btn]',
+        '[vp-suggestion-button]','.vw-links'
       ];
       hideSelectors.forEach(function(sel) {
         document.querySelectorAll(sel).forEach(function(el) { el.style.display = 'none'; });
@@ -116,11 +147,63 @@ function init() {
 }
 setTimeout(init, 2000);
 
-// Funcao para traduzir texto
+// Fila de textos para traduzir
+var traduzirFila = [];
+var playerPronto = false;
+var traduzindoAgora = false;
+
+function verificarPlayerPronto() {
+  var canvas = document.querySelector('#gameContainer canvas');
+  if (canvas && canvas.width > 0) {
+    playerPronto = true;
+    processarFila();
+  } else {
+    setTimeout(verificarPlayerPronto, 500);
+  }
+}
+setTimeout(verificarPlayerPronto, 3000);
+
+function processarFila() {
+  if (traduzindoAgora || traduzirFila.length === 0 || !playerPronto) return;
+  traduzindoAgora = true;
+  var texto = traduzirFila.shift();
+
+  // Tenta multiplas formas de acionar o VLibras
+  try {
+    // Metodo 1: API interna do widget
+    if (window.vlibras && window.vlibras.translate) {
+      window.vlibras.translate(texto);
+    }
+    // Metodo 2: instancia Vue do player
+    var player = document.querySelector('[vw-player]') || document.querySelector('#gameContainer');
+    if (player && player.__vue__) {
+      player.__vue__.translate(texto);
+    }
+    // Metodo 3: campo de texto + botao traduzir (mais confiavel)
+    var textarea = document.querySelector('.vp-user-textarea');
+    var btnTraduzir = document.querySelector('.vp-play-gloss-button');
+    if (textarea && btnTraduzir) {
+      textarea.value = texto;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(function() { btnTraduzir.removeAttribute('disabled'); btnTraduzir.click(); }, 200);
+    }
+    // Metodo 4: evento padrao como fallback
+    window.dispatchEvent(new CustomEvent('vlibras:translate', { detail: { text: texto } }));
+  } catch(e) {
+    console.log('[VLibras] erro ao traduzir: ' + e);
+  }
+
+  var espera = Math.max(2000, texto.split(' ').length * 600);
+  setTimeout(function() {
+    traduzindoAgora = false;
+    processarFila();
+  }, espera);
+}
+
 function traduzir(texto) {
-  window.dispatchEvent(new CustomEvent('vlibras:translate', {
-    detail: { text: texto }
-  }));
+  if (!texto || texto.trim() === '') return;
+  traduzirFila.push(texto.trim());
+  processarFila();
 }
 </script>
 </body>
