@@ -4,10 +4,13 @@ import tempfile
 import threading
 import http.server
 import socketserver
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QLabel, QHBoxLayout
+)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage, QWebEngineProfile
-from PyQt6.QtCore import Qt, QUrl, QPoint, pyqtSlot, QTimer
+from PyQt6.QtCore import Qt, QUrl, QPoint, pyqtSlot, QTimer, QCoreApplication
+from PyQt6.QtGui import QFont
 
 HTTP_PORT = 19825
 
@@ -22,55 +25,16 @@ html, body {
   background: #1a2a3a;
   overflow: hidden;
 }
-/* Esconde tudo exceto o player */
 [vw-access-button] { display: none !important; }
-[vw-plugin-wrapper] {
-  position: fixed !important;
-  inset: 0 !important;
-  z-index: 1 !important;
-}
-.vw-plugin-top-wrapper {
-  width: 100% !important;
-  height: 100% !important;
-}
-[vp-main-guide-screen],
-[vp-rate-box],
-[vp-suggestion-screen],
-[vp-settings],
-[vp-info-screen],
-[vp-translator-screen],
-[vp-more-options-screen],
-[vp-aux-controls],
-[vp-controls],
-[vp-change-avatar],
-[vp-emotions-tooltip],
-[vp-click-blocker],
-[vp-dictionary],
-[vp-settings-btn],
-[vp-suggestion-button],
-.vp-guide-container,
-.vpw-controls,
-.vpw-message-box,
-[settings-btn],
-[settings-btn-close],
-.vpw-settings-btn,
-.vpw-mes,
-[vp-box],
-.vpw-box,
-.vw-links {
-  display: none !important;
-}
+[vw-plugin-wrapper] { position: fixed !important; inset: 0 !important; }
+.vw-plugin-top-wrapper { width: 100% !important; height: 100% !important; }
 
-/* Canvas ocupa tudo sem margem do box */
 #gameContainer {
   position: fixed !important;
   inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
-  background: #1a2a3a !important;
-  overflow: hidden !important;
 }
-
 #gameContainer canvas {
   position: absolute !important;
   top: 0 !important;
@@ -89,8 +53,11 @@ html, body {
     <div class="vw-plugin-top-wrapper"></div>
   </div>
 </div>
+
 <script src="https://vlibras.gov.br/app/vlibras-plugin.js"></script>
 <script>
+console.log("[VLibras] Página carregada");
+
 new window.VLibras.Widget({
   rootPath: 'https://vlibras.gov.br/app',
   avatar: 'icaro',
@@ -98,163 +65,156 @@ new window.VLibras.Widget({
   position: 'BR',
 });
 
-// Abre o player e fecha tutorial automaticamente
-function init() {
+let playerReady = false;
+let translateQueue = [];
+
+function log(msg) {
+  console.log("[VLibras JS] " + msg);
+}
+
+// Tenta inicializar o player
+function initPlayer() {
+  log("Tentando inicializar...");
   var btn = document.querySelector('[vw-access-button]');
   if (btn) {
     btn.click();
+    log("Botão de acesso clicado");
 
-    setTimeout(function() {
+    setTimeout(() => {
       var denyBtn = document.querySelector('.vpw-guide__main__deny-btn');
-      if (denyBtn) denyBtn.click();
-
-      // Abre o painel de traducao interno
-      var btnTranslator = document.querySelector('.vp-translator-button');
-      if (btnTranslator) btnTranslator.click();
-
-      var hideSelectors = [
-        '[vp-main-guide-screen]','[vp-rate-box]','[vp-suggestion-screen]',
-        '[vp-settings]','[vp-info-screen]','[vp-translator-screen]',
-        '[vp-more-options-screen]','[vp-aux-controls]','[vp-controls]',
-        '[vp-change-avatar]','[vp-click-blocker]','[vp-emotions-tooltip]',
-        '.vp-guide-container','.vpw-controls','.vpw-message-box',
-        '[settings-btn]','.vpw-settings-btn','.vpw-mes'
-      ];
-      hideSelectors.forEach(function(sel) {
-        document.querySelectorAll(sel).forEach(function(el) { el.style.display = 'none'; });
-      });
-    }, 800);
-
-    setInterval(function() {
-      var denyBtn = document.querySelector('.vpw-guide__main__deny-btn');
-      if (denyBtn && denyBtn.offsetParent !== null) denyBtn.click();
-
-      var hideSelectors = [
-        '[vp-main-guide-screen]','[vp-rate-box]','[vp-suggestion-screen]',
-        '[vp-controls]','[vp-aux-controls]','[vp-change-avatar]',
-        '[vp-box]','.vpw-box','.vp-guide-container','.vpw-controls',
-        '.vpw-message-box','[vp-dictionary]','[vp-settings-btn]',
-        '[vp-suggestion-button]','.vw-links'
-      ];
-      hideSelectors.forEach(function(sel) {
-        document.querySelectorAll(sel).forEach(function(el) { el.style.display = 'none'; });
-      });
-    }, 1500);
-
+      if (denyBtn) {
+        denyBtn.click();
+        log("Tutorial fechado");
+      }
+    }, 1000);
   } else {
-    setTimeout(init, 500);
+    setTimeout(initPlayer, 600);
   }
 }
-setTimeout(init, 2000);
+setTimeout(initPlayer, 1200);
 
-// Fila de textos para traduzir
-var traduzirFila = [];
-var playerPronto = false;
-var traduzindoAgora = false;
-
-function verificarPlayerPronto() {
-  var canvas = document.querySelector('#gameContainer canvas');
-  if (canvas && canvas.width > 0) {
-    playerPronto = true;
-    processarFila();
+// Verifica se o player está pronto
+function checkPlayerReady() {
+  if (document.querySelector('#gameContainer canvas')) {
+    playerReady = true;
+    log("Player VLibras pronto!");
+    processQueue();
   } else {
-    setTimeout(verificarPlayerPronto, 500);
+    setTimeout(checkPlayerReady, 800);
   }
 }
-setTimeout(verificarPlayerPronto, 3000);
+setTimeout(checkPlayerReady, 3000);
 
-function processarFila() {
-  if (traduzindoAgora || traduzirFila.length === 0 || !playerPronto) return;
-  traduzindoAgora = true;
-  var texto = traduzirFila.shift();
+// Processa fila de traduções
+function processQueue() {
+  if (translateQueue.length === 0 || !playerReady) return;
 
-  // Tenta multiplas formas de acionar o VLibras
+  const text = translateQueue.shift();
+  log("Traduzindo: " + text);
+
   try {
-    // Metodo 1: API interna do widget
-    if (window.vlibras && window.vlibras.translate) {
-      window.vlibras.translate(texto);
-    }
-    // Metodo 2: instancia Vue do player
-    var player = document.querySelector('[vw-player]') || document.querySelector('#gameContainer');
-    if (player && player.__vue__) {
-      player.__vue__.translate(texto);
-    }
-    // Metodo 3: campo de texto + botao traduzir (mais confiavel)
-    var textarea = document.querySelector('.vp-user-textarea');
-    var btnTraduzir = document.querySelector('.vp-play-gloss-button');
-    if (textarea && btnTraduzir) {
-      textarea.value = texto;
+    // Estratégia 1: Campo de texto + botão (mais confiável)
+    const textarea = document.querySelector('.vp-user-textarea');
+    const playBtn = document.querySelector('.vp-play-gloss-button');
+
+    if (textarea && playBtn) {
+      textarea.value = text;
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      setTimeout(function() { btnTraduzir.removeAttribute('disabled'); btnTraduzir.click(); }, 200);
+      setTimeout(() => {
+        playBtn.removeAttribute('disabled');
+        playBtn.click();
+        log("Tradução enviada via botão");
+      }, 200);
+    } 
+    // Estratégia 2: API interna
+    else if (window.vlibras && window.vlibras.translate) {
+      window.vlibras.translate(text);
+      log("Usando window.vlibras.translate");
+    } 
+    // Estratégia 3: Evento customizado
+    else {
+      window.dispatchEvent(new CustomEvent('vlibras:translate', { 
+        detail: { text: text } 
+      }));
     }
-    // Metodo 4: evento padrao como fallback
-    window.dispatchEvent(new CustomEvent('vlibras:translate', { detail: { text: texto } }));
-  } catch(e) {
-    console.log('[VLibras] erro ao traduzir: ' + e);
+  } catch (e) {
+    log("Erro ao traduzir: " + e);
   }
 
-  var espera = Math.max(2000, texto.split(' ').length * 600);
-  setTimeout(function() {
-    traduzindoAgora = false;
-    processarFila();
-  }, espera);
+  // Processa próximo após um delay baseado no tamanho do texto
+  const delay = Math.max(2000, text.split(' ').length * 600);
+  setTimeout(processQueue, delay);
 }
 
-function traduzir(texto) {
-  if (!texto || texto.trim() === '') return;
-  traduzirFila.push(texto.trim());
-  processarFila();
-}
+// Função global chamada pelo Python
+window.traduzir = function(text) {
+  if (text && text.trim()) {
+    translateQueue.push(text.trim());
+    log("Texto adicionado na fila: " + text);
+    if (playerReady) processQueue();
+  }
+};
+
+log("Script VLibras carregado com sucesso");
 </script>
 </body>
 </html>"""
 
-
+# ====================== Servidor ======================
 _server_started = False
 
-def start_server():
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(HTML.encode("utf-8"))
+
+    def log_message(self, *args): pass
+
+
+def start_http_server():
     global _server_started
-    if _server_started:
-        return
+    if _server_started: return
     _server_started = True
 
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(HTML.encode("utf-8"))
-        def log_message(self, *a): pass
+    class ReusableTCPServer(socketserver.TCPServer):
+        allow_reuse_address = True
 
-    try:
-        with socketserver.TCPServer(("127.0.0.1", HTTP_PORT), Handler) as srv:
-            srv.serve_forever()
-    except OSError:
-        pass
+    def run_server():
+        try:
+            with ReusableTCPServer(("127.0.0.1", HTTP_PORT), Handler) as httpd:
+                print(f"[Avatar] Servidor HTTP iniciado na porta {HTTP_PORT}")
+                httpd.serve_forever()
+        except Exception as e:
+            print(f"[Avatar] Servidor: {e}")
 
-threading.Thread(target=start_server, daemon=True).start()
+    threading.Thread(target=run_server, daemon=True).start()
 
 
+# ====================== AvatarWindow ======================
 class ConsolePage(QWebEnginePage):
     def javaScriptConsoleMessage(self, level, message, line, source):
         print(f"[JS] {message}")
 
 
 class AvatarWindow(QWidget):
-    def __init__(self, width=300, height=420):
+    def __init__(self, width=360, height=520):
         super().__init__()
         self._drag_pos = QPoint()
         self._width = width
         self._height = height
+
+        start_http_server()
         self._setup_window()
-        self._setup_webview()
+        self._setup_ui()
 
     def _setup_window(self):
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
         )
         self.setStyleSheet("background: #1a2a3a;")
         self.resize(self._width, self._height)
@@ -262,15 +222,14 @@ class AvatarWindow(QWidget):
 
     def _place_on_screen(self):
         screen = QApplication.primaryScreen().geometry()
-        self.move(
-            screen.width()  - self._width  - 20,
-            screen.height() - self._height - 60,
-        )
+        self.move(screen.width() - self._width - 30, screen.height() - self._height - 100)
 
-    def _setup_webview(self):
+    def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
+        # Avatar
         cache_path = os.path.join(tempfile.gettempdir(), "vlibras_wgt")
         os.makedirs(cache_path, exist_ok=True)
 
@@ -279,29 +238,51 @@ class AvatarWindow(QWidget):
         self._profile.setPersistentStoragePath(cache_path)
 
         self._page = ConsolePage(self._profile, self)
-
         settings = self._page.settings()
-        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        for attr in (QWebEngineSettings.WebAttribute.JavascriptEnabled,
+                     QWebEngineSettings.WebAttribute.PluginsEnabled,
+                     QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls):
+            settings.setAttribute(attr, True)
 
         self._webview = QWebEngineView()
         self._webview.setPage(self._page)
-        self._webview.setStyleSheet("background: #1a2a3a;")
         self._webview.load(QUrl(f"http://127.0.0.1:{HTTP_PORT}/"))
-        layout.addWidget(self._webview)
+        layout.addWidget(self._webview, stretch=1)
 
-    def retry(self):
-        self._profile.cookieStore().deleteAllCookies()
-        self._place_on_screen()
-        self._webview.load(QUrl(f"http://127.0.0.1:{HTTP_PORT}/"))
+        # Legenda
+        sub_container = QWidget()
+        sub_container.setStyleSheet("background: rgba(0,0,0,0.9); border-top: 2px solid #00FF88;")
+        sub_layout = QHBoxLayout(sub_container)
+        sub_layout.setContentsMargins(16, 12, 16, 12)
+
+        self._subtitle = QLabel("Aguardando tradução...")
+        self._subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._subtitle.setWordWrap(True)
+        self._subtitle.setFont(QFont("Consolas", 11, QFont.Weight.Medium))
+        self._subtitle.setStyleSheet("color: #00FFAA;")
+        sub_layout.addWidget(self._subtitle)
+
+        layout.addWidget(sub_container)
 
     @pyqtSlot(str)
     def translate(self, text: str):
-        escaped = text.replace("'", "\\'").replace('"', '\\"')
+        if not text or not text.strip():
+            return
+
+        clean_text = text.strip()
+        self._subtitle.setText(clean_text)
+        print(f"[Avatar] Enviando para tradução: {clean_text}")
+
+        escaped = clean_text.replace("'", "\\'").replace('"', '\\"')
         self._page.runJavaScript(f"traduzir('{escaped}');")
 
+    def retry(self):
+        print("[Avatar] Reiniciando avatar...")
+        self._profile.cookieStore().deleteAllCookies()
+        self._webview.load(QUrl(f"http://127.0.0.1:{HTTP_PORT}/"))
+        self._subtitle.setText("Reiniciando...")
+
+    # Drag
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -315,21 +296,14 @@ class AvatarWindow(QWidget):
 
 
 if __name__ == "__main__":
-    try:
-        import torch
-        torch_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
-        if os.path.isdir(torch_dir):
-            os.add_dll_directory(torch_dir)
-    except Exception:
-        pass
-
-    from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa
-    from PyQt6.QtCore import QCoreApplication
+    app = QApplication(sys.argv)
     QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--enable-gpu --ignore-gpu-blocklist"
 
-    app = QApplication(sys.argv)
     avatar = AvatarWindow()
     avatar.show()
-    QTimer.singleShot(10000, lambda: avatar.translate("OLA TUDO BEM"))
+
+    # Teste automático
+    QTimer.singleShot(7000, lambda: avatar.translate("OLÁ, TESTANDO A TRADUÇÃO DO AVATAR"))
+
     sys.exit(app.exec())
