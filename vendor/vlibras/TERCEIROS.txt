@@ -1,0 +1,15 @@
+VLibras — componente de terceiros
+=================================
+
+Este diretorio contem o VLibras (player e assets), desenvolvido pelo Governo
+Federal do Brasil em parceria com a UFPB / LAVID.
+
+  Repositorios: https://github.com/spbgovbr-vlibras
+  Licenca:      LGPL-3.0
+
+O codigo deste diretorio NAO foi modificado por este projeto: ele e apenas
+utilizado (linkado) pelo middleware. Isso preserva o caracter de "copyleft
+fraco" da LGPL-3.0 e mantem o restante do middleware sob licenca propria.
+
+Se algum arquivo aqui vier a ser MODIFICADO, as modificacoes passam a estar
+sujeitas a LGPL-3.0 e devem ser disponibilizadas conforme a licenca.

@@ -1,0 +1,10 @@
+/vendor/vlibras/cache/
+node_modules/
+.vlibras_build/
+vendor/vlibras/cache/
+.venv/
+__pycache__/
+*.pyc
+.cache/whisper/
+.idea/
+

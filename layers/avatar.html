@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+[vw-access-button] { display: none !important; }
+[vw-plugin-wrapper] {
+  position: fixed !important;
+  inset: 0 !important;
+  background: transparent !important;
+}
+.vw-plugin-top-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+  background: transparent !important;
+}
+canvas { background: transparent !important; }
+</style>
+</head>
+<body>
+<div vw class="enabled">
+  <div vw-access-button class="active"></div>
+  <div vw-plugin-wrapper>
+    <div class="vw-plugin-top-wrapper"></div>
+  </div>
+</div>
+
+<script src="https://vlibras.gov.br/app/vlibras-plugin.js"></script>
+<script>
+  var ready = false;
+
+  window.addEventListener('load', function() {
+    new window.VLibras.Widget({
+      rootPath: 'https://vlibras.gov.br/app',
+      opacity: 0,
+      avatar: 'icaro',
+    });
+
+    // Aguarda o botao aparecer e abre o player
+    function tryOpen() {
+      var btn = document.querySelector('[vw-access-button]');
+      if (btn) {
+        btn.click();
+        ready = true;
+        console.log('[VLibras] pronto');
+      } else {
+        setTimeout(tryOpen, 400);
+      }
+    }
+    setTimeout(tryOpen, 1500);
+  });
+
+  // Chamado pelo Python via runJavaScript()
+  function traduzir(texto) {
+    if (!ready) {
+      setTimeout(function() { traduzir(texto); }, 500);
+      return;
+    }
+    window.dispatchEvent(
+      new CustomEvent('vlibras:translate', { detail: { text: texto } })
+    );
+    console.log('[VLibras] traduzindo: ' + texto);
+  }
+</script>
+</body>
+</html>

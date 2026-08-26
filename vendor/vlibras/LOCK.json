@@ -1,0 +1,7 @@
+{
+  "player_repo": "https://github.com/spbgovbr-vlibras/vlibras-player-webjs.git",
+  "player_ref": "5389767f8dcb915e6cd1a768095bfefa825c3d14",
+  "translator_url": "https://traducao2.vlibras.gov.br/translate",
+  "vendored_at": "2026-08-26T12:08:42",
+  "license": "LGPL-3.0"
+}
