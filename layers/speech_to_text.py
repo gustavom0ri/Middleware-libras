@@ -53,6 +53,20 @@ class SpeechToText:
         audio_chunk = audio_chunk.astype(np.float32)
         audio_chunk = np.clip(audio_chunk, -1.0, 1.0)
 
+        # Descarta silêncio antes de gastar CPU/GPU com o modelo
+        rms = float(np.sqrt(np.mean(audio_chunk ** 2)))
+        if rms < SILENCE_THRESHOLD:
+            logger.debug(f"Chunk silencioso ignorado (RMS={rms:.4f})")
+            return None
+
+        result = self._model.transcribe(
+            audio_chunk,
+            language="pt",
+            fp16=False,  # CPU não suporta fp16
+            task="transcribe",
+        )
+
+        text = (result.get("text") or "").strip()
 
         if not text:
             return None
